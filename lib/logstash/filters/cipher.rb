@@ -186,6 +186,10 @@ class LogStash::Filters::Cipher < LogStash::Filters::Base
       if !@max_cipher_reuse.nil? and total_cipher_uses >= @max_cipher_reuse
         @logger.debug("max_cipher_reuse["+@max_cipher_reuse.to_s+"] reached, total_cipher_uses = "+total_cipher_uses.to_s)
         init_cipher
+      else
+        @logger.debug("max_cipher_reuse["+@max_cipher_reuse.to_s+"] not reached (total_cipher_uses = "+total_cipher_uses.to_s + "), just resetting")
+        # Reset the internal state of the cipher so it is ready to handle the next event
+        cipher.reset
       end
 
     end
