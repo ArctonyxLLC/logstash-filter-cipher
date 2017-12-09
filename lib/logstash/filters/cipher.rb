@@ -117,7 +117,6 @@ class LogStash::Filters::Cipher < LogStash::Filters::Base
 
   def register
     require 'base64' if @base64
-    init_cipher
   end # def register
 
 
@@ -145,9 +144,15 @@ class LogStash::Filters::Cipher < LogStash::Filters::Base
         @random_iv = OpenSSL::Random.random_bytes(@iv_random_length)
       end
 
-      @cipher.iv = @random_iv
+      if !Thread.current.thread_variable?("cipher")
+        cipher = init_cipher
+      else
+        cipher = Thread.current.thread_variable_get("cipher")
+      end
 
-      result = @cipher.update(data) + @cipher.final
+      cipher.iv = @random_iv
+
+      result = cipher.update(data) + cipher.final
 
       if @mode == "encrypt"
 
@@ -166,7 +171,9 @@ class LogStash::Filters::Cipher < LogStash::Filters::Base
       init_cipher
 
     else
-      @total_cipher_uses += 1
+      total_cipher_uses = Thread.current.thread_variable_get("total_cipher_uses")
+      total_cipher_uses += 1
+      Thread.current.thread_variable_set("total_cipher_uses", total_cipher_uses)
 
       result = result.force_encoding("utf-8") if @mode == "decrypt"
 
@@ -176,8 +183,8 @@ class LogStash::Filters::Cipher < LogStash::Filters::Base
       #In doubt, I keep it.
       filter_matched(event) if !result.nil?
 
-      if !@max_cipher_reuse.nil? and @total_cipher_uses >= @max_cipher_reuse
-        @logger.debug("max_cipher_reuse["+@max_cipher_reuse.to_s+"] reached, total_cipher_uses = "+@total_cipher_uses.to_s)
+      if !@max_cipher_reuse.nil? and total_cipher_uses >= @max_cipher_reuse
+        @logger.debug("max_cipher_reuse["+@max_cipher_reuse.to_s+"] reached, total_cipher_uses = "+total_cipher_uses.to_s)
         init_cipher
       end
 
@@ -186,19 +193,15 @@ class LogStash::Filters::Cipher < LogStash::Filters::Base
 
   def init_cipher
 
-    if !@cipher.nil?
-      @cipher.reset
-      @cipher = nil
-    end
+    cipher = OpenSSL::Cipher.new(@algorithm)
+    Thread.current.thread_variable_set("cipher", cipher)
 
-    @cipher = OpenSSL::Cipher.new(@algorithm)
-
-    @total_cipher_uses = 0
+    Thread.current.thread_variable_set("total_cipher_uses", 0)
 
     if @mode == "encrypt"
-      @cipher.encrypt
+      cipher.encrypt
     elsif @mode == "decrypt"
-      @cipher.decrypt
+      cipher.decrypt
     else
       @logger.error("Invalid cipher mode. Valid values are \"encrypt\" or \"decrypt\"", :mode => @mode)
       raise "Bad configuration, aborting."
@@ -209,11 +212,13 @@ class LogStash::Filters::Cipher < LogStash::Filters::Base
       @key = @key[0,@key_size].ljust(@key_size,@key_pad)
     end
 
-    @cipher.key = @key
+    cipher.key = @key
 
-    @cipher.padding = @cipher_padding if @cipher_padding
+    cipher.padding = @cipher_padding if @cipher_padding
 
     @logger.debug("Cipher initialisation done", :mode => @mode, :key => @key, :iv_random_length => @iv_random_length, :iv_random => @iv_random, :cipher_padding => @cipher_padding)
+
+    cipher
   end # def init_cipher
 
 
