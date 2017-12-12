@@ -136,12 +136,12 @@ class LogStash::Filters::Cipher < LogStash::Filters::Base
       data = event.get(@source)
       if @mode == "decrypt"
         data =  Base64.strict_decode64(data) if @base64 == true
-        @random_iv = data.byteslice(0,@iv_random_length)
+        random_iv = data.byteslice(0,@iv_random_length)
         data = data.byteslice(@iv_random_length..data.length)
       end
 
       if @mode == "encrypt"
-        @random_iv = OpenSSL::Random.random_bytes(@iv_random_length)
+        random_iv = OpenSSL::Random.random_bytes(@iv_random_length)
       end
 
       if !Thread.current.thread_variable?("cipher")
@@ -150,15 +150,15 @@ class LogStash::Filters::Cipher < LogStash::Filters::Base
         cipher = Thread.current.thread_variable_get("cipher")
       end
 
-      cipher.iv = @random_iv
+      cipher.iv = random_iv
 
       result = cipher.update(data) + cipher.final
 
       if @mode == "encrypt"
 
         # if we have a random_iv, prepend that to the crypted result
-        if !@random_iv.nil?
-          result = @random_iv + result
+        if !random_iv.nil?
+          result = random_iv + result
         end
 
         result =  Base64.strict_encode64(result).encode("utf-8") if @base64 == true
