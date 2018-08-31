@@ -144,11 +144,8 @@ class LogStash::Filters::Cipher < LogStash::Filters::Base
         random_iv = OpenSSL::Random.random_bytes(@iv_random_length)
       end
 
-      if !Thread.current.thread_variable?("cipher")
-        cipher = init_cipher
-      else
-        cipher = Thread.current.thread_variable_get("cipher")
-      end
+      # threads do not always handle events from the same filter block so we need to reinitialize at the start to make sure we are using the correct encryption key
+      cipher = init_cipher
 
       cipher.iv = random_iv
 
@@ -167,13 +164,7 @@ class LogStash::Filters::Cipher < LogStash::Filters::Base
     rescue => e
       @logger.warn("Exception catch on cipher filter", :event => event, :error => e)
 
-      # force a re-initialize on error to be safe
-      init_cipher
-
     else
-      total_cipher_uses = Thread.current.thread_variable_get("total_cipher_uses")
-      total_cipher_uses += 1
-      Thread.current.thread_variable_set("total_cipher_uses", total_cipher_uses)
 
       result = result.force_encoding("utf-8") if @mode == "decrypt"
 
@@ -183,14 +174,7 @@ class LogStash::Filters::Cipher < LogStash::Filters::Base
       #In doubt, I keep it.
       filter_matched(event) if !result.nil?
 
-      if !@max_cipher_reuse.nil? and total_cipher_uses >= @max_cipher_reuse
-        @logger.debug("max_cipher_reuse["+@max_cipher_reuse.to_s+"] reached, total_cipher_uses = "+total_cipher_uses.to_s)
-        init_cipher
-      else
-        @logger.debug("max_cipher_reuse["+@max_cipher_reuse.to_s+"] not reached (total_cipher_uses = "+total_cipher_uses.to_s + "), just resetting")
-        # Reset the internal state of the cipher so it is ready to handle the next event
-        cipher.reset
-      end
+      # cipher will be reinitialized when we get the next event so no need to do anything else with it now
 
     end
   end # def filter
@@ -198,9 +182,6 @@ class LogStash::Filters::Cipher < LogStash::Filters::Base
   def init_cipher
 
     cipher = OpenSSL::Cipher.new(@algorithm)
-    Thread.current.thread_variable_set("cipher", cipher)
-
-    Thread.current.thread_variable_set("total_cipher_uses", 0)
 
     if @mode == "encrypt"
       cipher.encrypt
